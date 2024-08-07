@@ -1,113 +1,340 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import {
+  PublicKey,
+  Keypair,
+  Transaction,
+  SystemProgram,
+  Connection,
+} from "@solana/web3.js";
+
+import {
+  createInitializeMintInstruction,
+  getMinimumBalanceForRentExemptMint,
+  TOKEN_PROGRAM_ID,
+  MINT_SIZE,
+  createTransferInstruction,
+  createMintToCheckedInstruction,
+  createBurnCheckedInstruction,
+} from "@solana/spl-token";
+import { ReactNode, useState } from "react";
+
+import { useWallet } from "@solana/wallet-adapter-react";
+import dynamic from "next/dynamic";
+
+const WalletMultiButtonDynamic = dynamic(
+  async () =>
+    (await import("@solana/wallet-adapter-react-ui")).WalletMultiButton,
+  { ssr: false }
+);
+export function AppHero({
+  children,
+  title,
+  subtitle,
+}: {
+  children?: ReactNode;
+  title: ReactNode;
+  subtitle: ReactNode;
+}) {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">src/app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
+    <div className="hero py-[64px]">
+      <div className="hero-content text-center">
+        <div className="max-w-2xl">
+          {typeof title === "string" ? (
+            <h1 className="text-5xl font-bold">{title}</h1>
+          ) : (
+            title
+          )}
+          {typeof subtitle === "string" ? (
+            <p className="py-6">{subtitle}</p>
+          ) : (
+            subtitle
+          )}
+          {children}
         </div>
       </div>
+    </div>
+  );
+}
 
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-full sm:before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full sm:after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 before:lg:h-[360px] z-[-1]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
+export default function Page() {
+  const HELIUS_API = "";
+  const connection = new Connection(
+    `https://devnet.helius-rpc.com/?api-key=${HELIUS_API}`
+  );
+
+  const wallet = useWallet();
+
+  const { publicKey, signTransaction, sendTransaction } = useWallet();
+  const [transferAmount, setTransferAmount] = useState("");
+  const [recipient, setRecipient] = useState("");
+  const [mintAmount, setMintAmount] = useState("");
+  const [burnAmount, setBurnAmount] = useState("");
+  const [delegateAddress, setDelegateAddress] = useState("");
+
+  const handleSignature = async (tx: Transaction) => {
+    try {
+      console.log("Sending transaction...");
+      const signature = await sendTransaction(tx, connection);
+      await connection.confirmTransaction(signature, "processed");
+      console.log("Transaction signature:", signature);
+      return signature;
+    } catch (error) {
+      console.error("Error sending transaction:", error);
+      return null;
+    }
+  };
+
+  const handleCreateToken = async () => {
+    if (!publicKey) {
+      console.error("Wallet not connected");
+      return;
+    }
+    console.log("Creating token...");
+
+    const decimal = 9;
+    const mint = Keypair.generate();
+    const lamports_value = await getMinimumBalanceForRentExemptMint(connection);
+
+    let tx = new Transaction().add(
+      SystemProgram.createAccount({
+        fromPubkey: publicKey,
+        newAccountPubkey: mint.publicKey,
+        space: MINT_SIZE,
+        lamports: lamports_value,
+        programId: TOKEN_PROGRAM_ID,
+      }),
+      createInitializeMintInstruction(
+        mint.publicKey,
+        decimal,
+        publicKey,
+        publicKey
+      )
+    );
+
+    await handleSignature(tx);
+  };
+
+  const handleTransfer = async () => {
+    if (!publicKey || !transferAmount || !recipient) {
+      console.error("Wallet not connected or missing input fields");
+      return;
+    }
+
+    const recipientPubkey = new PublicKey(recipient);
+    const onCurve = PublicKey.isOnCurve(recipientPubkey);
+
+    if (!onCurve) {
+      console.error("Invalid recipient address");
+      return;
+    }
+
+    console.log("Transferring tokens...");
+
+    const tx = new Transaction().add(
+      createTransferInstruction(
+        publicKey,
+        PublicKey.default,
+        new PublicKey(recipient),
+        Number(transferAmount),
+        [],
+        TOKEN_PROGRAM_ID
+      )
+    );
+
+    const sign = await handleSignature(tx);
+    if (sign != null) console.log("Transfer completed");
+  };
+
+  const handleMint = async () => {
+    if (!publicKey || !mintAmount) {
+      console.error("Wallet not connected or missing input fields");
+      return;
+    }
+
+    console.log("Minting tokens...");
+
+    const mintPubkey = "YOUR_MINT_PUBLIC_KEY_HERE";
+    const mintPublicKey = new PublicKey(mintPubkey);
+
+    const tx = new Transaction().add(
+      createMintToCheckedInstruction(
+        mintPublicKey,
+        publicKey,
+        publicKey,
+        Number(mintAmount),
+        0
+      )
+    );
+
+    const sign = await handleSignature(tx);
+    if (sign != null) console.log("Minting completed");
+  };
+
+  const handleBurn = async () => {
+    if (!publicKey || !burnAmount) {
+      console.error("Wallet not connected or missing input fields");
+      return;
+    }
+
+    console.log("Burning tokens...");
+
+    const mintPubkey = "YOUR_MINT_PUBLIC_KEY_HERE";
+    const mintPublicKey = new PublicKey(mintPubkey);
+
+    const tx = new Transaction().add(
+      createBurnCheckedInstruction(
+        mintPublicKey,
+        publicKey,
+        publicKey,
+        Number(burnAmount),
+        0
+      )
+    );
+
+    const sign = await handleSignature(tx);
+    if (sign != null) console.log("Minting completed");
+  };
+
+  const handleDelegate = async () => {
+    if (!publicKey || !delegateAddress) {
+      console.error("Wallet not connected or missing input fields");
+      return;
+    }
+
+    if (!PublicKey.isOnCurve(new PublicKey(delegateAddress))) {
+      console.error("Invalid delegate address");
+      return;
+    }
+
+    console.log("Delegating tokens...");
+
+    const mintPubkey = "YOUR_MINT_PUBLIC_KEY_HERE";
+    const mintPublicKey = new PublicKey(mintPubkey);
+
+    // const tx = new Transaction().add(
+    //   createApproveInstruction(
+    //     mintPublicKey,
+    //     new PublicKey(delegateAddress),
+    //     publicKey,
+    //     [],
+    //     TOKEN_PROGRAM_ID
+    //   )
+    // );
+
+    // const sign = await handleSignature(tx);
+    // if (sign != null) console.log("Delegation completed");
+  };
+
+  const address = publicKey;
+
+  return (
+    <div className="flex justify-center items-center min-h-screen bg-gray-800">
+      <div className="w-full max-w-lg p-6 bg-gray-900 rounded-lg">
+        <div className="flex justify-between p-4 border-b border-gray-700">
+          <div className="flex items-center space-x-4">
+            <h3 className="font-serif text-white">tokenonana</h3>
+          </div>
+          <div>
+            <WalletMultiButtonDynamic>
+              {wallet.publicKey
+                ? `${wallet.publicKey.toBase58().substring(0, 7)}...`
+                : "Connect Wallet"}
+            </WalletMultiButtonDynamic>
+          </div>
+        </div>
+
+        <div className="text-center py-4">
+          <h1 className="text-2xl text-white">SPL Tokens</h1>
+          <p className="text-gray-400">
+            Create and interact with tokens on Solana
+          </p>
+        </div>
+        <div className="my-4">
+          <div className="text-white">
+            Account: {address && address.toBase58()}
+          </div>
+          <button
+            onClick={handleCreateToken}
+            className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg mt-2"
+          >
+            Create New Token
+          </button>
+        </div>
+
+        <div className="space-y-8">
+          <div className="my-4">
+            <input
+              type="text"
+              value={transferAmount}
+              onChange={(e) => setTransferAmount(e.target.value)}
+              placeholder="Amount"
+              className="w-full px-3 py-2 bg-gray-800 text-white border border-gray-700 rounded-lg"
+            />
+            <input
+              type="text"
+              value={recipient}
+              onChange={(e) => setRecipient(e.target.value)}
+              placeholder="Recipient Address"
+              className="w-full px-3 py-2 bg-gray-800 text-white border border-gray-700 rounded-lg mt-2"
+            />
+            <button
+              onClick={handleTransfer}
+              className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg mt-2"
+            >
+              Transfer
+            </button>
+          </div>
+
+          <div className="my-4">
+            <input
+              type="text"
+              value={mintAmount}
+              onChange={(e) => setMintAmount(e.target.value)}
+              placeholder="Mint Amount"
+              className="w-full px-3 py-2 bg-gray-800 text-white border border-gray-700 rounded-lg"
+            />
+            <button
+              onClick={handleMint}
+              className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg mt-2"
+            >
+              Mint
+            </button>
+          </div>
+
+          <div className="my-4">
+            <input
+              type="text"
+              value={burnAmount}
+              onChange={(e) => setBurnAmount(e.target.value)}
+              placeholder="Burn Amount"
+              className="w-full px-3 py-2 bg-gray-800 text-white border border-gray-700 rounded-lg"
+            />
+            <button
+              onClick={handleBurn}
+              className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg mt-2"
+            >
+              Burn
+            </button>
+          </div>
+
+          <div className="my-4">
+            <input
+              type="text"
+              value={delegateAddress}
+              onChange={(e) => setDelegateAddress(e.target.value)}
+              placeholder="Delegate Address"
+              className="w-full px-3 py-2 bg-gray-800 text-white border border-gray-700 rounded-lg"
+            />
+            <button
+              onClick={handleDelegate}
+              className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg mt-2"
+            >
+              Delegate
+            </button>
+          </div>
+        </div>
       </div>
-
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50 text-balance`}>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
+    </div>
   );
 }
